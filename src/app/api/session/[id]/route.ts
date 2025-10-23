@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { supabaseAdmin } from '@/lib/supabase'
 
 export async function DELETE(
   request: NextRequest,
@@ -9,45 +9,32 @@ export async function DELETE(
     const sessionId = params.id
 
     // Get session from database
-    const session = await db.session.findUnique({
-      where: { id: sessionId },
-      include: {
-        documents: {
-          include: {
-            chunks: true,
-            queries: true
-          }
-        }
-      }
-    })
+    const { data: session, error: sessionError } = await supabaseAdmin
+      .from('Session')
+      .select('*')
+      .eq('id', sessionId)
+      .single()
 
-    if (!session) {
+    if (sessionError || !session) {
       return NextResponse.json(
         { error: 'Session not found' },
         { status: 404 }
       )
     }
 
-    // Delete all related data (cascade delete should handle this, but let's be explicit)
-    for (const document of session.documents) {
-      // Delete chunks and queries for this document
-      await db.chunk.deleteMany({
-        where: { documentId: document.id }
-      })
-      await db.query.deleteMany({
-        where: { documentId: document.id }
-      })
+    // Delete session and related data (cascade delete should handle this)
+    const { error: deleteError } = await supabaseAdmin
+      .from('Session')
+      .delete()
+      .eq('id', sessionId)
+
+    if (deleteError) {
+      console.error('Session deletion error:', deleteError)
+      return NextResponse.json(
+        { error: 'Failed to end session' },
+        { status: 500 }
+      )
     }
-
-    // Delete documents
-    await db.document.deleteMany({
-      where: { sessionId: sessionId }
-    })
-
-    // Delete session
-    await db.session.delete({
-      where: { id: sessionId }
-    })
 
     // Clear session cookie
     const response = NextResponse.json({ message: 'Session ended successfully' })

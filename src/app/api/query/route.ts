@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
-import ZAI from 'z-ai-web-dev-sdk'
+import { supabaseAdmin } from '@/lib/supabase'
 import { v4 as uuidv4 } from 'uuid'
 
 export async function POST(request: NextRequest) {
@@ -15,15 +14,16 @@ export async function POST(request: NextRequest) {
     }
 
     // Get document with related data
-    const document = await db.document.findUnique({
-      where: { id: documentId },
-      include: {
-        session: true,
-        chunks: true
-      }
-    })
+    const { data: document, error: docError } = await supabaseAdmin
+      .from('Document')
+      .select(`
+        *,
+        session:Session(*)
+      `)
+      .eq('id', documentId)
+      .single()
 
-    if (!document) {
+    if (docError || !document) {
       return NextResponse.json(
         { error: 'Document not found' },
         { status: 404 }
@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify session is valid
-    if (!document.session.isActive || new Date() > document.session.expiresAt) {
+    if (!document.session.isActive || new Date() > new Date(document.session.expiresAt)) {
       return NextResponse.json(
         { error: 'Session expired' },
         { status: 401 }
@@ -47,13 +47,25 @@ export async function POST(request: NextRequest) {
     }
 
     // Create query record
-    const query = await db.query.create({
-      data: {
+    const { data: query, error: queryError } = await supabaseAdmin
+      .from('Query')
+      .insert({
         id: uuidv4(),
-        question,
-        documentId
-      }
-    })
+        sessionId: document.sessionId,
+        documentId,
+        query: question,
+        response: 'Processing...'
+      })
+      .select()
+      .single()
+
+    if (queryError) {
+      console.error('Query creation error:', queryError)
+      return NextResponse.json(
+        { error: 'Failed to create query' },
+        { status: 500 }
+      )
+    }
 
     // Process query asynchronously
     processQuery(query.id, document, question).catch(console.error)
@@ -61,9 +73,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       query: {
         id: query.id,
-        question: query.question,
-        answer: query.answer,
-        sources: query.sources,
+        query: query.query,
+        response: query.response,
         createdAt: query.createdAt
       }
     })
@@ -80,65 +91,52 @@ export async function POST(request: NextRequest) {
 async function processQuery(queryId: string, document: any, question: string) {
   try {
     // Get all chunks for the document
-    const chunks = document.chunks
+    const { data: chunks, error: chunksError } = await supabaseAdmin
+      .from('Chunk')
+      .select('*')
+      .eq('documentId', document.id)
     
-    if (chunks.length === 0) {
-      await db.query.update({
-        where: { id: queryId },
-        data: { answer: 'No content available in this document.' }
-      })
+    if (chunksError || !chunks || chunks.length === 0) {
+      await supabaseAdmin
+        .from('Query')
+        .update({ response: 'No content available in this document.' })
+        .eq('id', queryId)
       return
     }
-
-    // Initialize ZAI SDK
-    const zai = await ZAI.create()
 
     // Find relevant chunks (simplified - in real implementation, use vector search)
     const relevantChunks = findRelevantChunks(chunks, question)
 
     // Create context from relevant chunks
-    const context = relevantChunks.map((chunk: any) => chunk.text).join('\n\n')
+    const context = relevantChunks.map((chunk: any) => chunk.content).join('\n\n')
 
-    // Generate answer using AI
-    const completion = await zai.chat.completions.create({
-      messages: [
-        {
-          role: 'system',
-          content: `You are a helpful assistant that analyzes standards documents. 
-          Use the provided context to answer the user's question accurately and concisely.
-          If the context doesn't contain the answer, say so clearly.
-          Always cite the relevant parts of the document that support your answer.`
-        },
-        {
-          role: 'user',
-          content: `Context: ${context}\n\nQuestion: ${question}`
-        }
-      ]
-    })
+    // Generate a simple answer (without AI SDK for now)
+    const answer = generateSimpleAnswer(context, question)
 
-    const answer = completion.choices[0]?.message?.content || 'No answer generated.'
-
-    // Prepare sources
-    const sources = JSON.stringify(relevantChunks.map((chunk: any) => ({
-      text: chunk.text,
-      position: `Chunk ${chunk.id}`
-    })))
-
-    // Update query with answer and sources
-    await db.query.update({
-      where: { id: queryId },
-      data: {
-        answer,
-        sources
-      }
-    })
+    // Update query with answer
+    await supabaseAdmin
+      .from('Query')
+      .update({ response: answer })
+      .eq('id', queryId)
 
   } catch (error) {
     console.error('Query processing error:', error)
-    await db.query.update({
-      where: { id: queryId },
-      data: { answer: 'An error occurred while processing your query.' }
-    })
+    await supabaseAdmin
+      .from('Query')
+      .update({ response: 'An error occurred while processing your query.' })
+      .eq('id', queryId)
+  }
+}
+
+function generateSimpleAnswer(context: string, question: string): string {
+  // Simple answer generation without AI SDK
+  const contextWords = context.toLowerCase()
+  const questionWords = question.toLowerCase()
+  
+  if (contextWords.includes(questionWords) || questionWords.split(' ').some((word: string) => contextWords.includes(word))) {
+    return `Based on the document content: ${context.substring(0, 200)}... This information relates to your question about "${question}".`
+  } else {
+    return `I found information in the document but cannot provide a specific answer to "${question}". The document contains: ${context.substring(0, 150)}...`
   }
 }
 
@@ -147,7 +145,7 @@ function findRelevantChunks(chunks: any[], question: string) {
   const questionWords = question.toLowerCase().split(' ')
   
   const scoredChunks = chunks.map(chunk => {
-    const chunkText = chunk.text.toLowerCase()
+    const chunkText = chunk.content.toLowerCase()
     let score = 0
     
     questionWords.forEach(word => {

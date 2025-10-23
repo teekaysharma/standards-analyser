@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { supabaseAdmin } from '@/lib/supabase'
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,11 +14,13 @@ export async function GET(request: NextRequest) {
     }
 
     // Verify session exists and is active
-    const session = await db.session.findUnique({
-      where: { id: sessionId }
-    })
+    const { data: session, error: sessionError } = await supabaseAdmin
+      .from('Session')
+      .select('*')
+      .eq('id', sessionId)
+      .single()
 
-    if (!session || !session.isActive || new Date() > session.expiresAt) {
+    if (sessionError || !session || !session.isActive || new Date() > new Date(session.expiresAt)) {
       return NextResponse.json(
         { error: 'Invalid or expired session' },
         { status: 401 }
@@ -26,12 +28,21 @@ export async function GET(request: NextRequest) {
     }
 
     // Get documents for this session
-    const documents = await db.document.findMany({
-      where: { sessionId },
-      orderBy: { createdAt: 'desc' }
-    })
+    const { data: documents, error: docsError } = await supabaseAdmin
+      .from('Document')
+      .select('*')
+      .eq('sessionId', sessionId)
+      .order('createdAt', { ascending: false })
 
-    return NextResponse.json(documents)
+    if (docsError) {
+      console.error('Documents fetch error:', docsError)
+      return NextResponse.json(
+        { error: 'Failed to fetch documents' },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json(documents || [])
   } catch (error) {
     console.error('Documents fetch error:', error)
     return NextResponse.json(
