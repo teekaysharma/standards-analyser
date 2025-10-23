@@ -308,9 +308,30 @@ export default function Home() {
                   alert("Test button works!")
                 }} 
                 variant="outline"
-                className="w-full"
+                className="w-full mb-2"
               >
                 Test Button (No API)
+              </Button>
+              <Button 
+                onClick={async () => {
+                  console.log("Debug button clicked!")
+                  try {
+                    const response = await fetch("/api/debug-session", {
+                      method: "POST",
+                      credentials: "include"
+                    })
+                    const result = await response.json()
+                    console.log("Debug result:", result)
+                    alert("Debug result: " + JSON.stringify(result, null, 2))
+                  } catch (error) {
+                    console.error("Debug error:", error)
+                    alert("Debug error: " + error.message)
+                  }
+                }} 
+                variant="outline"
+                className="w-full"
+              >
+                Debug Session API
               </Button>
             </CardContent>
           </Card>
