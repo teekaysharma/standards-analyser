@@ -15,7 +15,6 @@ import { useToast } from "@/hooks/use-toast"
 
 interface Session {
   id: string
-  token: string
   expiresAt: string
   isActive: boolean
   createdAt: string

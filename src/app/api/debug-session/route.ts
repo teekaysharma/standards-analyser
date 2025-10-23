@@ -28,7 +28,6 @@ export async function POST(request: NextRequest) {
     
     // Create a new session
     const sessionId = uuidv4()
-    const token = uuidv4()
     const expiresAt = new Date(Date.now() + 30 * 60 * 1000) // 30 minutes from now
     
     console.log('Creating session with ID:', sessionId)
@@ -37,7 +36,6 @@ export async function POST(request: NextRequest) {
       .from('Session')
       .insert({
         id: sessionId,
-        token,
         expiresAt: expiresAt.toISOString(),
         isActive: true
       })
@@ -60,7 +58,6 @@ export async function POST(request: NextRequest) {
       success: true,
       session: {
         id: session.id,
-        token: session.token,
         expiresAt: session.expiresAt,
         isActive: session.isActive,
         createdAt: session.createdAt
