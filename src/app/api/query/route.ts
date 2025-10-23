@@ -90,13 +90,18 @@ export async function POST(request: NextRequest) {
 
 async function processQuery(queryId: string, document: any, question: string) {
   try {
+    console.log(`Processing query ${queryId} for document ${document.id}`)
+    
     // Get all chunks for the document
     const { data: chunks, error: chunksError } = await supabaseAdmin
       .from('Chunk')
       .select('*')
       .eq('documentId', document.id)
     
+    console.log('Chunks query result:', { chunks, chunksError })
+    
     if (chunksError || !chunks || chunks.length === 0) {
+      console.log('No chunks found for document')
       await supabaseAdmin
         .from('Query')
         .update({ response: 'No content available in this document.' })
@@ -104,20 +109,31 @@ async function processQuery(queryId: string, document: any, question: string) {
       return
     }
 
+    console.log(`Found ${chunks.length} chunks for document`)
+
     // Find relevant chunks (simplified - in real implementation, use vector search)
     const relevantChunks = findRelevantChunks(chunks, question)
+    console.log(`Found ${relevantChunks.length} relevant chunks`)
 
     // Create context from relevant chunks
     const context = relevantChunks.map((chunk: any) => chunk.content).join('\n\n')
+    console.log('Context length:', context.length)
 
     // Generate a simple answer (without AI SDK for now)
     const answer = generateSimpleAnswer(context, question)
+    console.log('Generated answer:', answer)
 
     // Update query with answer
-    await supabaseAdmin
+    const { error: updateError } = await supabaseAdmin
       .from('Query')
       .update({ response: answer })
       .eq('id', queryId)
+    
+    if (updateError) {
+      console.error('Error updating query:', updateError)
+    } else {
+      console.log('Query updated successfully')
+    }
 
   } catch (error) {
     console.error('Query processing error:', error)

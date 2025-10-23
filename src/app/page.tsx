@@ -42,11 +42,12 @@ export default function Home() {
   const [session, setSession] = useState<Session | null>(null)
   const [documents, setDocuments] = useState<Document[]>([])
   const [queries, setQueries] = useState<Query[]>([])
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [question, setQuestion] = useState("")
   const [isUploading, setIsUploading] = useState(false)
   const [isQuerying, setIsQuerying] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
+  const [isDragOver, setIsDragOver] = useState(false)
   const { toast } = useToast()
 
   // Check for existing session on mount
@@ -146,42 +147,51 @@ export default function Home() {
   }
 
   const handleFileUpload = async () => {
-    if (!selectedFile || !session) return
+    if (selectedFiles.length === 0 || !session) return
 
     setIsUploading(true)
     setUploadProgress(0)
 
-    const formData = new FormData()
-    formData.append("file", selectedFile)
-    formData.append("sessionId", session.id)
-
     try {
-      const response = await fetch("/api/documents/upload", {
-        method: "POST",
-        body: formData,
-        credentials: "include"
-      })
+      // Upload files sequentially
+      for (let i = 0; i < selectedFiles.length; i++) {
+        const file = selectedFiles[i]
+        const formData = new FormData()
+        formData.append("file", file)
+        formData.append("sessionId", session.id)
 
-      if (response.ok) {
-        const result = await response.json()
-        setDocuments(prev => [...prev, result.document])
-        toast({
-          title: "Upload Successful",
-          description: "Document has been uploaded and processed."
+        const response = await fetch("/api/documents/upload", {
+          method: "POST",
+          body: formData,
+          credentials: "include"
         })
-        setSelectedFile(null)
-      } else {
-        const error = await response.json()
-        toast({
-          title: "Upload Failed",
-          description: error.message || "Failed to upload document.",
-          variant: "destructive"
-        })
+
+        if (response.ok) {
+          const result = await response.json()
+          setDocuments(prev => [...prev, result.document])
+          
+          // Update progress
+          const progress = ((i + 1) / selectedFiles.length) * 100
+          setUploadProgress(progress)
+        } else {
+          const error = await response.json()
+          toast({
+            title: "Upload Failed",
+            description: `${file.name}: ${error.message || "Failed to upload document."}`,
+            variant: "destructive"
+          })
+        }
       }
+
+      toast({
+        title: "Upload Complete",
+        description: `${selectedFiles.length} document(s) have been uploaded and processed.`
+      })
+      setSelectedFiles([])
     } catch (error) {
       toast({
         title: "Error",
-        description: "Failed to upload document.",
+        description: "Failed to upload documents.",
         variant: "destructive"
       })
     } finally {
@@ -234,6 +244,48 @@ export default function Home() {
     } finally {
       setIsQuerying(false)
     }
+  }
+
+  // Drag and drop handlers
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(false)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(false)
+    
+    const files = Array.from(e.dataTransfer.files)
+    const validFiles = files.filter(file => {
+      const allowedTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain']
+      return allowedTypes.includes(file.type) && file.size <= 10 * 1024 * 1024 // 10MB
+    })
+    
+    if (validFiles.length > 0) {
+      setSelectedFiles(prev => [...prev, ...validFiles])
+    }
+  }
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    const validFiles = files.filter(file => {
+      const allowedTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain']
+      return allowedTypes.includes(file.type) && file.size <= 10 * 1024 * 1024 // 10MB
+    })
+    
+    if (validFiles.length > 0) {
+      setSelectedFiles(prev => [...prev, ...validFiles])
+    }
+  }
+
+  const removeFile = (index: number) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index))
   }
 
   const formatFileSize = (bytes: number) => {
@@ -358,11 +410,21 @@ export default function Home() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-lg p-6 text-center">
+                  <div 
+                    className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
+                      isDragOver 
+                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-950' 
+                        : 'border-slate-300 dark:border-slate-600'
+                    }`}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                  >
                     <input
                       type="file"
                       accept=".pdf,.docx,.txt"
-                      onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                      multiple
+                      onChange={handleFileSelect}
                       className="hidden"
                       id="file-upload"
                     />
@@ -372,31 +434,48 @@ export default function Home() {
                         Click to upload or drag and drop
                       </p>
                       <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">
-                        PDF, DOCX, TXT up to 10MB
+                        PDF, DOCX, TXT up to 10MB each
                       </p>
                     </label>
                   </div>
                   
-                  {selectedFile && (
-                    <div className="bg-slate-50 dark:bg-slate-800 p-3 rounded-lg">
-                      <div className="flex items-center gap-2 mb-2">
-                        <FileText className="h-4 w-4" />
-                        <span className="text-sm font-medium truncate">
-                          {selectedFile.name}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-600 dark:text-slate-400">
-                        {formatFileSize(selectedFile.size)}
+                  {selectedFiles.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                        Selected Files ({selectedFiles.length})
                       </p>
+                      {selectedFiles.map((file, index) => (
+                        <div key={index} className="bg-slate-50 dark:bg-slate-800 p-3 rounded-lg flex items-center justify-between">
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <FileText className="h-4 w-4 text-slate-600" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium truncate">
+                                {file.name}
+                              </p>
+                              <p className="text-xs text-slate-600 dark:text-slate-400">
+                                {formatFileSize(file.size)}
+                              </p>
+                            </div>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeFile(index)}
+                            className="h-8 w-8 p-0"
+                          >
+                            ×
+                          </Button>
+                        </div>
+                      ))}
                     </div>
                   )}
                   
                   <Button 
                     onClick={handleFileUpload} 
-                    disabled={!selectedFile || isUploading}
+                    disabled={selectedFiles.length === 0 || isUploading}
                     className="w-full"
                   >
-                    {isUploading ? "Processing..." : "Upload & Process"}
+                    {isUploading ? "Processing..." : `Upload & Process ${selectedFiles.length > 0 ? `(${selectedFiles.length})` : ''}`}
                   </Button>
                   
                   {isUploading && (
