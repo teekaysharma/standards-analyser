@@ -76,10 +76,15 @@ export default function Home() {
 
   const loadDocuments = async (sessionId: string) => {
     try {
+      console.log("Loading documents for session:", sessionId)
       const response = await fetch(`/api/documents?sessionId=${sessionId}`)
+      console.log("Documents response:", response)
       if (response.ok) {
         const docs = await response.json()
+        console.log("Documents loaded:", docs)
         setDocuments(docs)
+      } else {
+        console.error("Failed to load documents, status:", response.status)
       }
     } catch (error) {
       console.error("Failed to load documents:", error)
@@ -98,6 +103,9 @@ export default function Home() {
         const sessionData = await response.json()
         console.log("Session data:", sessionData)
         setSession(sessionData)
+        console.log("Session state set, loading documents...")
+        loadDocuments(sessionData.id)
+        console.log("Documents load initiated")
         // Simple alert for now instead of toast
         alert("Session created successfully!")
       } else {
