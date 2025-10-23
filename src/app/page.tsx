@@ -52,15 +52,21 @@ export default function Home() {
 
   // Check for existing session on mount
   useEffect(() => {
+    console.log("Component mounted, checking session...")
     const checkSession = async () => {
       try {
+        console.log("Checking existing session...")
         const response = await fetch("/api/session/check", {
           credentials: "include"
         })
+        console.log("Session check response:", response)
         if (response.ok) {
           const sessionData = await response.json()
+          console.log("Existing session data:", sessionData)
           setSession(sessionData)
           loadDocuments(sessionData.id)
+        } else {
+          console.log("No existing session found")
         }
       } catch (error) {
         console.error("Session check failed:", error)
@@ -83,24 +89,26 @@ export default function Home() {
 
   const createSession = async () => {
     try {
+      console.log("Creating session...")
       const response = await fetch("/api/session", {
         method: "POST",
         credentials: "include"
       })
+      console.log("Session response:", response)
       if (response.ok) {
         const sessionData = await response.json()
+        console.log("Session data:", sessionData)
         setSession(sessionData)
-        toast({
-          title: "Session Created",
-          description: "Your session has been created successfully."
-        })
+        // Simple alert for now instead of toast
+        alert("Session created successfully!")
+      } else {
+        const error = await response.json()
+        console.error("Session creation failed:", error)
+        alert("Failed to create session: " + (error.error || "Unknown error"))
       }
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to create session.",
-        variant: "destructive"
-      })
+      console.error("Session creation error:", error)
+      alert("Failed to create session. Please check the console.")
     }
   }
 
@@ -285,8 +293,24 @@ export default function Home() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Button onClick={createSession} className="w-full">
+              <Button 
+                onClick={() => {
+                  console.log("Button clicked!")
+                  createSession()
+                }} 
+                className="w-full mb-2"
+              >
                 Create New Session
+              </Button>
+              <Button 
+                onClick={() => {
+                  console.log("Test button clicked!")
+                  alert("Test button works!")
+                }} 
+                variant="outline"
+                className="w-full"
+              >
+                Test Button (No API)
               </Button>
             </CardContent>
           </Card>
