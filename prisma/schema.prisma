@@ -9,7 +9,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -19,14 +19,76 @@ model User {
   name      String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  
+  sessions  Session[]
 }
 
-model Post {
-  id        String   @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+model Session {
+  id          String   @id @default(cuid())
+  token       String   @unique
+  expiresAt   DateTime
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+  
+  documents   Document[]
+  
+  @@index([token])
+  @@index([expiresAt])
+  @@index([isActive])
+}
+
+model Document {
+  id            String   @id @default(cuid())
+  filename      String
+  originalName  String
+  filePath      String?
+  storagePath   String?  // Supabase storage path
+  fileType      String
+  fileSize      Int
+  status        String   @default("uploaded") // uploaded, processing, ready, error
+  metadata      String?  // JSON metadata
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  sessionId     String
+  session       Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  chunks        Chunk[]
+  queries       Query[]
+  
+  @@index([sessionId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Chunk {
+  id            String   @id @default(cuid())
+  text          String
+  startPosition Int
+  endPosition   Int
+  embedding     String?  // Base64 encoded embedding
+  createdAt     DateTime @default(now())
+  
+  documentId    String
+  document      Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  
+  @@index([documentId])
+}
+
+model Query {
+  id          String   @id @default(cuid())
+  question    String
+  answer      String?
+  sources     String?  // JSON sources
+  createdAt   DateTime @default(now())
+  
+  documentId  String
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  
+  @@index([documentId])
+  @@index([createdAt])
 }
