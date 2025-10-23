@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
-import { db } from '@/lib/db'
-import { uploadDocument } from '@/lib/supabase-storage'
-import ZAI from 'z-ai-web-dev-sdk'
+import { supabaseAdmin, uploadFileToStorage, getPublicUrl } from '@/lib/supabase'
 
 export async function POST(request: NextRequest) {
   try {
@@ -18,11 +16,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify session exists and is active
-    const session = await db.session.findUnique({
-      where: { id: sessionId }
-    })
+    const { data: session, error: sessionError } = await supabaseAdmin
+      .from('Session')
+      .select('*')
+      .eq('id', sessionId)
+      .single()
 
-    if (!session || !session.isActive || new Date() > session.expiresAt) {
+    if (sessionError || !session || !session.isActive || new Date() > new Date(session.expiresAt)) {
       return NextResponse.json(
         { error: 'Invalid or expired session' },
         { status: 401 }
@@ -50,39 +50,55 @@ export async function POST(request: NextRequest) {
     // Generate unique filename
     const fileExtension = file.name.split('.').pop()
     const filename = `${uuidv4()}.${fileExtension}`
+    const filePath = `${sessionId}/${filename}`
 
     // Upload to Supabase Storage
-    const uploadResult = await uploadDocument(file, filename)
+    const { data: uploadData, error: uploadError } = await uploadFileToStorage(file, filePath)
+
+    if (uploadError) {
+      console.error('Storage upload error:', uploadError)
+      return NextResponse.json(
+        { error: 'Failed to upload file to storage' },
+        { status: 500 }
+      )
+    }
+
+    // Get public URL
+    const publicUrl = getPublicUrl(filePath)
 
     // Create document record in database
-    const document = await db.document.create({
-      data: {
+    const { data: document, error: docError } = await supabaseAdmin
+      .from('Document')
+      .insert({
         id: uuidv4(),
-        filename,
-        originalName: file.name,
-        storagePath: uploadResult.path,
+        sessionId,
+        fileName: filename,
         fileType: file.type,
         fileSize: file.size,
-        status: 'uploaded',
-        sessionId,
-        metadata: JSON.stringify({
-          publicUrl: uploadResult.publicUrl,
-          size: uploadResult.size
-        })
-      }
-    })
+        filePath: filePath
+      })
+      .select()
+      .single()
+
+    if (docError) {
+      console.error('Document creation error:', docError)
+      return NextResponse.json(
+        { error: 'Failed to create document record' },
+        { status: 500 }
+      )
+    }
 
     // Process document asynchronously
-    processDocument(document.id, uploadResult.publicUrl).catch(console.error)
+    processDocument(document.id, publicUrl).catch(console.error)
 
     return NextResponse.json({
       document: {
         id: document.id,
-        filename: document.filename,
-        originalName: document.originalName,
+        filename: document.fileName,
+        originalName: file.name,
         fileType: document.fileType,
         fileSize: document.fileSize,
-        status: document.status,
+        status: 'uploaded',
         createdAt: document.createdAt
       }
     })
@@ -99,15 +115,12 @@ export async function POST(request: NextRequest) {
 async function processDocument(documentId: string, publicUrl: string) {
   try {
     // Update document status to processing
-    await db.document.update({
-      where: { id: documentId },
-      data: { status: 'processing' }
-    })
+    await supabaseAdmin
+      .from('Document')
+      .update({ status: 'processing' })
+      .eq('id', documentId)
 
-    // Initialize ZAI SDK
-    const zai = await ZAI.create()
-
-    // For this demo, we'll simulate text extraction
+    // Simulate document processing
     // In a real implementation, you would:
     // 1. Download the file from publicUrl
     // 2. Use PDF/DOCX parsing libraries to extract text
@@ -122,29 +135,28 @@ async function processDocument(documentId: string, publicUrl: string) {
     // Create chunks in database
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i]
-      await db.chunk.create({
-        data: {
+      await supabaseAdmin
+        .from('Chunk')
+        .insert({
           id: uuidv4(),
-          text: chunk.text,
-          startPosition: chunk.start,
-          endPosition: chunk.end,
-          documentId
-        }
-      })
+          documentId,
+          content: chunk.text,
+          chunkIndex: i
+        })
     }
 
     // Update document status to ready
-    await db.document.update({
-      where: { id: documentId },
-      data: { status: 'ready' }
-    })
+    await supabaseAdmin
+      .from('Document')
+      .update({ status: 'ready' })
+      .eq('id', documentId)
 
   } catch (error) {
     console.error('Document processing error:', error)
-    await db.document.update({
-      where: { id: documentId },
-      data: { status: 'error' }
-    })
+    await supabaseAdmin
+      .from('Document')
+      .update({ status: 'error' })
+      .eq('id', documentId)
   }
 }
 

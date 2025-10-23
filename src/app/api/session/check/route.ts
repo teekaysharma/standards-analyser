@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { supabaseAdmin } from '@/lib/supabase'
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,11 +14,13 @@ export async function GET(request: NextRequest) {
     }
 
     // Get session from database
-    const session = await db.session.findUnique({
-      where: { id: sessionId }
-    })
+    const { data: session, error } = await supabaseAdmin
+      .from('Session')
+      .select('*')
+      .eq('id', sessionId)
+      .single()
 
-    if (!session) {
+    if (error || !session) {
       return NextResponse.json(
         { error: 'Session not found' },
         { status: 404 }
@@ -26,7 +28,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Check if session is expired
-    if (new Date() > session.expiresAt || !session.isActive) {
+    if (new Date() > new Date(session.expiresAt) || !session.isActive) {
       return NextResponse.json(
         { error: 'Session expired' },
         { status: 401 }

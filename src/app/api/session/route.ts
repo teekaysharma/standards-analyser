@@ -1,21 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
 import { v4 as uuidv4 } from 'uuid'
+import { supabaseAdmin } from '@/lib/supabase'
 
 export async function POST(request: NextRequest) {
   try {
     // Create a new session
+    const sessionId = uuidv4()
     const token = uuidv4()
     const expiresAt = new Date(Date.now() + 30 * 60 * 1000) // 30 minutes from now
     
-    const session = await db.session.create({
-      data: {
-        id: uuidv4(),
+    const { data: session, error } = await supabaseAdmin
+      .from('Session')
+      .insert({
+        id: sessionId,
         token,
-        expiresAt,
+        expiresAt: expiresAt.toISOString(),
         isActive: true
-      }
-    })
+      })
+      .select()
+      .single()
+
+    if (error) {
+      console.error('Session creation error:', error)
+      return NextResponse.json(
+        { error: 'Failed to create session' },
+        { status: 500 }
+      )
+    }
 
     // Set session cookie
     const response = NextResponse.json({
